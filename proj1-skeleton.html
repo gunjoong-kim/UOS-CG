@@ -44,6 +44,10 @@
             const scene = new THREE.Scene();
             scene.background = new THREE.Color("black");
 
+            // for debuging
+            const axesHelper = new THREE.AxesHelper(100);
+            scene.add(axesHelper);
+
             // room
             const room = { width: 30, height: 20 };
             {
@@ -56,6 +60,28 @@
                 cubeMat.side = THREE.BackSide;
                 const mesh = new THREE.Mesh(cubeGeo, cubeMat);
                 mesh.position.set(0, room.height / 2, 0);
+                scene.add(mesh);
+            }
+
+            // add some 3D models here -> Torus, Plane...
+            const torus = {
+                radius: 3,
+                tube: 1,
+                radialSegments: 16,
+                tubularSegments: 100,
+            };
+            {
+                const torusGeo = new THREE.TorusGeometry(
+                    torus.radius,
+                    torus.tube,
+                    torus.radialSegments,
+                    torus.tubularSegments
+                );
+                const torusMat = new THREE.MeshPhongMaterial({
+                    color: "#FFFFFF",
+                });
+                const mesh = new THREE.Mesh(torusGeo, torusMat);
+                mesh.position.set(-7, 8, -4);
                 scene.add(mesh);
             }
 
