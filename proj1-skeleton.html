@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=yes"
+        />
+        <title>Project #1 - Luxo Lamp</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+            }
+            #webgl {
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="webgl"></canvas>
+    </body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three/build/three.module.js",
+                "orbitcontrols": "https://unpkg.com/three/examples/jsm/controls/OrbitControls.js",
+                "datgui": "https://unpkg.com/dat.gui/build/dat.gui.module.js"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from "three";
+        import { OrbitControls } from "orbitcontrols";
+        import { GUI } from "datgui";
+
+        function main() {
+            const canvas = document.querySelector("#webgl");
+            const renderer = new THREE.WebGLRenderer({ canvas });
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color("black");
+
+            // room
+            const room = { width: 30, height: 20 };
+            {
+                const cubeGeo = new THREE.BoxGeometry(
+                    room.width,
+                    room.height,
+                    room.width
+                );
+                const cubeMat = new THREE.MeshPhongMaterial({ color: "#8AC" });
+                cubeMat.side = THREE.BackSide;
+                const mesh = new THREE.Mesh(cubeGeo, cubeMat);
+                mesh.position.set(0, room.height / 2, 0);
+                scene.add(mesh);
+            }
+
+            // define the luxo lamp
+
+            // base
+            const base = new THREE.Object3D();
+            {
+                scene.add(base);
+            }
+
+            // baseMesh
+            const baseMesh = { width: 4, height: 1, color: "red" };
+            {
+                baseMesh.mesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(1, 1, 1),
+                    new THREE.MeshPhongMaterial({ color: baseMesh.color })
+                );
+                base.add(baseMesh.mesh);
+            }
+
+            // baseDisc
+            const baseDisc = new THREE.Object3D();
+            {
+                baseDisc.angle = 20;
+                base.add(baseDisc);
+            }
+
+            // baseDiscMesh
+            const baseDiscMesh = {
+                radius: 1,
+                height: 0.2,
+                color: "orange",
+                segs: 8,
+            };
+            {
+                baseDiscMesh.mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(
+                        baseDiscMesh.radius,
+                        baseDiscMesh.radius,
+                        baseDiscMesh.height,
+                        baseDiscMesh.segs
+                    ),
+                    new THREE.MeshPhongMaterial({ color: baseDiscMesh.color })
+                );
+                baseDisc.add(baseDiscMesh.mesh);
+            }
+
+            function updateLuxo() {
+                base.position.y = baseMesh.height / 2;
+                baseMesh.mesh.scale.set(
+                    baseMesh.width,
+                    baseMesh.height,
+                    baseMesh.width
+                );
+
+                baseDisc.position.y = baseMesh.height / 2;
+                baseDisc.rotation.y = THREE.MathUtils.degToRad(baseDisc.angle);
+                baseDiscMesh.mesh.position.y = baseDiscMesh.height / 2;
+            }
+
+            updateLuxo();
+
+            {
+                const gui = new GUI();
+                let folder;
+                folder = gui.addFolder("base (red box)");
+                folder
+                    .add(base.position, "x", -room.width / 2, room.width / 2, 1)
+                    .name("x")
+                    .onChange(updateLuxo);
+                folder
+                    .add(base.position, "z", -room.width / 2, room.width / 2, 1)
+                    .name("z")
+                    .onChange(updateLuxo);
+                folder
+                    .add(baseMesh, "height", 0.1, 2, 0.1)
+                    .name("height")
+                    .onChange(updateLuxo);
+                folder.open();
+
+                gui.add(baseDisc, "angle", 0, 360, 1)
+                    .name("angle (yellow)")
+                    .onChange(updateLuxo);
+            }
+
+            {
+                // point light
+                const light = new THREE.PointLight("white", 500);
+                light.position.set(0, room.height, 0);
+                scene.add(light);
+
+                const helper = new THREE.PointLightHelper(light);
+                scene.add(helper);
+            }
+            {
+                // an ambient light
+                const light = new THREE.AmbientLight("white", 0.3);
+                scene.add(light);
+            }
+
+            const fov = 45;
+            const aspect = 2; // the canvas default
+            const near = 0.1;
+            const far = 100;
+            const camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
+            camera.position.set(0, room.height * 0.5, room.width * 1.4);
+
+            const controls = new OrbitControls(camera, canvas);
+            controls.target.set(0, room.height * 0.5, 0);
+            controls.update();
+
+            function resizeRendererToDisplaySize(renderer) {
+                const canvas = renderer.domElement;
+                const width = canvas.clientWidth;
+                const height = canvas.clientHeight;
+                const needResize =
+                    canvas.width !== width || canvas.height !== height;
+                if (needResize) {
+                    renderer.setSize(width, height, false);
+                }
+                return needResize;
+            }
+
+            function render() {
+                if (resizeRendererToDisplaySize(renderer)) {
+                    const canvas = renderer.domElement;
+                    camera.aspect = canvas.clientWidth / canvas.clientHeight;
+                    camera.updateProjectionMatrix();
+                }
+
+                renderer.render(scene, camera);
+
+                requestAnimationFrame(render);
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        main();
+    </script>
+</html>
