@@ -130,6 +130,123 @@
                 baseDisc.add(baseDiscMesh.mesh);
             }
 
+            const joint = {
+                radius: 0.4,
+                height: 1.0,
+                color: "green",
+                segs: 8,
+            };
+
+            const arm = {
+                radius: 0.4,
+                height: 4,
+                color: "blue",
+                segs: 8,
+            };
+
+            const lowerArm = new THREE.Object3D();
+            {
+                const angle = -30;
+                lowerArm.rotation.x = Math.PI * (angle / 180);
+                baseDisc.add(lowerArm);
+            }
+
+            {
+                //lowest joint
+                const mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(
+                        joint.radius,
+                        joint.radius,
+                        joint.height,
+                        joint.segs
+                    ),
+                    new THREE.MeshPhongMaterial({ color: joint.color })
+                );
+                mesh.rotation.set(0, 0, Math.PI / 2);
+                mesh.position.set(0, baseDiscMesh.height / 2, 0);
+                lowerArm.add(mesh);
+            }
+
+            {
+                //lower arm
+                const mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(
+                        arm.radius,
+                        arm.radius,
+                        arm.height,
+                        arm.segs
+                    ),
+                    new THREE.MeshPhongMaterial({ color: arm.color })
+                );
+                mesh.position.set(0, arm.height / 2, 0);
+                lowerArm.add(mesh);
+            }
+
+            const upperArm = new THREE.Object3D();
+            {
+                const angle = 70;
+                upperArm.position.set(0, arm.height, 0);
+                upperArm.rotation.x = Math.PI * (angle / 180);
+                lowerArm.add(upperArm);
+            }
+
+            {
+                //middle joint
+                const mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(
+                        joint.radius,
+                        joint.radius,
+                        joint.height,
+                        joint.segs
+                    ),
+                    new THREE.MeshPhongMaterial({ color: joint.color })
+                );
+                mesh.rotation.set(0, 0, Math.PI / 2);
+                mesh.position.set(0, baseDiscMesh.height / 2, 0);
+                upperArm.add(mesh);
+            }
+
+            {
+                //middle arm
+                const mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(
+                        arm.radius,
+                        arm.radius,
+                        arm.height,
+                        arm.segs
+                    ),
+                    new THREE.MeshPhongMaterial({ color: arm.color })
+                );
+                mesh.position.set(0, arm.height / 2, 0);
+                upperArm.add(mesh);
+            }
+
+            const head = new THREE.Object3D();
+            {
+                const angle = -30;
+                head.rotation.x = Math.PI * (angle / 180);
+                head.position.set(0, arm.height, 0);
+                upperArm.add(head);
+            }
+
+            {
+                //middle joint
+                const mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(
+                        joint.radius,
+                        joint.radius,
+                        joint.height,
+                        joint.segs
+                    ),
+                    new THREE.MeshPhongMaterial({ color: joint.color })
+                );
+                mesh.rotation.set(0, 0, Math.PI / 2);
+                mesh.position.set(0, baseDiscMesh.height / 2, 0);
+                head.add(mesh);
+            }
+
+            // Add cylinder and light under the head joint
+
             function updateLuxo() {
                 base.position.y = baseMesh.height / 2;
                 baseMesh.mesh.scale.set(
