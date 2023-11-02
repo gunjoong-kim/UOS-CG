@@ -106,7 +106,7 @@
                     capsule.radialSegs
                 );
                 const capsuleMat = new THREE.MeshPhongMaterial({
-                    color: capsule.color
+                    color: capsule.color,
                 });
                 const mesh = new THREE.Mesh(capsuleGeo, capsuleMat);
                 mesh.position.set(5, 5, 5);
@@ -128,7 +128,7 @@
                     icosahedron.radialSegs
                 );
                 const icosahedronMat = new THREE.MeshPhongMaterial({
-                    color: icosahedron.color
+                    color: icosahedron.color,
                 });
                 const mesh = new THREE.Mesh(icosahedronGeo, icosahedronMat);
                 mesh.position.set(8, 7, -10);
@@ -142,8 +142,8 @@
                 tube: 1,
                 tubularSegs: 100,
                 radialSegs: 16,
-                color: "pink"
-            }
+                color: "pink",
+            };
             {
                 const torusKnotGeo = new THREE.TorusKnotGeometry(
                     torusKnot.radius,
@@ -152,7 +152,7 @@
                     torusKnot.radialSegs
                 );
                 const torusKnotMat = new THREE.MeshPhongMaterial({
-                    color: torusKnot.color
+                    color: torusKnot.color,
                 });
                 const mesh = new THREE.Mesh(torusKnotGeo, torusKnotMat);
                 mesh.position.set(-10, 13, 0);
@@ -162,10 +162,10 @@
             }
 
             const box = {
-                width : 2,
-                height : 2,
-                color : "yellow"
-            }
+                width: 2,
+                height: 2,
+                color: "yellow",
+            };
             {
                 const boxGeo = new THREE.BoxGeometry(
                     box.width,
@@ -173,10 +173,10 @@
                     box.height
                 );
                 const boxMat = new THREE.MeshPhongMaterial({
-                    color: box.color
+                    color: box.color,
                 });
                 const mesh = new THREE.Mesh(boxGeo, boxMat);
-                mesh.position.set(0,10,0);
+                mesh.position.set(0, 10, 0);
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
                 scene.add(mesh);
@@ -410,6 +410,7 @@
                 head.light.angle = THREE.MathUtils.degToRad(bulb.angle);
                 head.bulbHelper.visible = makeVisible.visible;
                 axesHelper.visible = makeVisible.visible;
+                head.bulbHelper.update();
             }
 
             updateLuxo();
@@ -476,7 +477,7 @@
                     .onChange(updateLuxo);
                 bulbFolder.open();
 
-                gui.add(makeVisible, 'visible')
+                gui.add(makeVisible, "visible")
                     .name("Toggle All Helpers")
                     .onChange(updateLuxo);
             }
