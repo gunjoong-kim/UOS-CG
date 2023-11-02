@@ -138,8 +138,9 @@
             };
 
             const arm = {
-                radius: 0.4,
-                height: 4,
+                radius: 0.3,
+                lowerHeight: 5,
+                upperHeight: 4,
                 color: "blue",
                 segs: 8,
             };
@@ -173,19 +174,19 @@
                     new THREE.CylinderGeometry(
                         arm.radius,
                         arm.radius,
-                        arm.height,
+                        arm.lowerHeight,
                         arm.segs
                     ),
                     new THREE.MeshPhongMaterial({ color: arm.color })
                 );
-                mesh.position.set(0, arm.height / 2, 0);
+                mesh.position.set(0, arm.lowerHeight / 2, 0);
                 lowerArm.add(mesh);
             }
 
             const upperArm = new THREE.Object3D();
             {
                 const angle = 70;
-                upperArm.position.set(0, arm.height, 0);
+                upperArm.position.set(0, arm.lowerHeight, 0);
                 upperArm.rotation.x = Math.PI * (angle / 180);
                 lowerArm.add(upperArm);
             }
@@ -196,13 +197,12 @@
                     new THREE.CylinderGeometry(
                         joint.radius,
                         joint.radius,
-                        joint.height,
+                        joint.upperHeight,
                         joint.segs
                     ),
                     new THREE.MeshPhongMaterial({ color: joint.color })
                 );
                 mesh.rotation.set(0, 0, Math.PI / 2);
-                mesh.position.set(0, baseDiscMesh.height / 2, 0);
                 upperArm.add(mesh);
             }
 
@@ -212,20 +212,20 @@
                     new THREE.CylinderGeometry(
                         arm.radius,
                         arm.radius,
-                        arm.height,
+                        arm.upperHeight,
                         arm.segs
                     ),
                     new THREE.MeshPhongMaterial({ color: arm.color })
                 );
-                mesh.position.set(0, arm.height / 2, 0);
+                mesh.position.set(0, arm.upperHeight / 2, 0);
                 upperArm.add(mesh);
             }
 
             const head = new THREE.Object3D();
             {
-                const angle = -30;
+                const angle = 90;
                 head.rotation.x = Math.PI * (angle / 180);
-                head.position.set(0, arm.height, 0);
+                head.position.set(0, arm.upperHeight, 0);
                 upperArm.add(head);
             }
 
@@ -246,6 +246,52 @@
             }
 
             // Add cylinder and light under the head joint
+            const cover = {
+                radiusTop: 2,
+                radiusBottom: 0.4,
+                height: 2.5,
+                color: "gray",
+                segs: 32,
+            };
+            {
+                const mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(
+                        cover.radiusTop,
+                        cover.radiusBottom,
+                        cover.height,
+                        cover.segs
+                    ),
+                    new THREE.MeshPhongMaterial({ color: cover.color })
+                );
+                mesh.position.set(0, cover.height / 2, 0);
+                head.add(mesh);
+            }
+
+            const bulb = {
+                radius: 0.8,
+                widthSegs: 32,
+                heightSegs: 16,
+                color: "white",
+                lumen: 250,
+            };
+            {
+                const mesh = new THREE.Mesh(
+                    new THREE.SphereGeometry(
+                        bulb.radius,
+                        bulb.widthSegs,
+                        bulb.heightSegs
+                    ),
+                    new THREE.MeshPhongMaterial({ color: bulb.color })
+                );
+                const light = new THREE.PointLight("white", 200);
+                light.position.set(0, cover.height, 0);
+                head.add(light);
+                const helper = new THREE.PointLightHelper(light);
+                scene.add(helper);
+                mesh.position.set(0, cover.height, 0);
+                head.add(mesh);
+                head.add(light);
+            }
 
             function updateLuxo() {
                 base.position.y = baseMesh.height / 2;
@@ -264,21 +310,35 @@
 
             {
                 const gui = new GUI();
-                let folder;
-                folder = gui.addFolder("base (red box)");
-                folder
+                let posFolder;
+                posFolder = gui.addFolder("base (red box)");
+                posFolder
                     .add(base.position, "x", -room.width / 2, room.width / 2, 1)
                     .name("x")
                     .onChange(updateLuxo);
-                folder
+                posFolder
                     .add(base.position, "z", -room.width / 2, room.width / 2, 1)
                     .name("z")
                     .onChange(updateLuxo);
-                folder
+                posFolder
                     .add(baseMesh, "height", 0.1, 2, 0.1)
                     .name("height")
                     .onChange(updateLuxo);
-                folder.open();
+                posFolder.open();
+
+                let armFolder;
+                armFolder = gui.addFolder("arm(blue) lengths");
+                armFolder
+                    .add(arm, "lowerHeight", 2, 7, 0.1)
+                    .name("lower")
+                    .onChange(updateLuxo);
+                armFolder
+                    .add(arm, "upperHeight", 2, 7, 0.1)
+                    .name("upper")
+                    .onChange(updateLuxo);
+                armFolder.open();
+
+                gui.addFolder("joint(green) angles");
 
                 gui.add(baseDisc, "angle", 0, 360, 1)
                     .name("angle (yellow)")
