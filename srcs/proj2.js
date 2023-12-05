@@ -1,10 +1,13 @@
 import * as mat4 from "./lib/gl-matrix/mat4.js";
+import * as vec3 from "./lib/gl-matrix/vec3.js";
 import {toRadian} from "./lib/gl-matrix/common.js";
 import {createEarth, createAxisLongitude, createLatitude, createSatellite} from "./create_mesh.js"
+
 const loc_aPosition = 0;
 const loc_aColor = 1;
 const loc_aNormal = 2;
 const loc_aTexCoord = 3;
+const loc_aDegree = 4;
 
 export class Context 
 {
@@ -18,6 +21,10 @@ export class Context
 	{
 		this.gl.useProgram(this.program.program);
     	this.gl.bindVertexArray(this.mesh.vao);
+		if (this.program.set_textures != null)
+		{
+			this.program.set_textures(this.gl);
+		}
     	this.gl.drawElements(this.mesh.drawMode, this.mesh.indiceCnt, this.gl.UNSIGNED_SHORT, 0);
     	this.gl.bindVertexArray(null);
 		this.gl.useProgram(null);
@@ -39,6 +46,8 @@ export class Program
 			this.gl.uniformMatrix4fv(location, false, value);
 		else if (type === "vec3")
 			this.gl.uniform3fv(location, value);
+		else if (type === "float")
+			this.gl.uniform1f(location, value);
 		else
 			console.log("No matching types...");
 	}
@@ -60,10 +69,12 @@ const helper_vert =
 `#version 300 es
 layout(location=${loc_aPosition}) in vec4 aPosition;
 layout(location=${loc_aColor}) in vec4 aColor;
-uniform mat4 MVP;
+uniform mat4 M;
+uniform mat4 VP;
 out vec4 vColor;
 void main() 
 {
+	mat4 MVP = VP * M;
     gl_Position = MVP * aPosition;
     vColor = aColor;
 }`;
@@ -80,26 +91,43 @@ void main()
 
 const earth_vert = 
 `#version 300 es
-layout(location=${loc_aPosition}) in vec4 aPosition;
-layout(location=${loc_aNormal}) in vec3 aNormal;
+layout(location=${loc_aDegree}) in vec2 aDegree;
 layout(location=${loc_aTexCoord}) in vec2 aTexCoord;
-uniform mat4 model;
-uniform mat4 MVP;
+uniform mat4 M;
+uniform mat4 VP;
 uniform vec3 lightPosition;
 uniform vec3 viewPosition;
+uniform sampler2D earthBump;
+uniform float scale;
 out vec3 vNormal;
 out vec2 vTexCoord;
 out vec3 vSurfaceToLight;
 out vec3 vSurfaceToView;
+
 void main() 
 {
-    gl_Position = MVP * aPosition;
-    vNormal = mat3(transpose(inverse(model))) * aNormal;
-	vTexCoord = aTexCoord;
-	vec3 surface = (model * aPosition).xyz;
-	vSurfaceToLight = lightPosition - surface;
-	vSurfaceToView = viewPosition - surface;
-}`;
+	vec2 invertedTexCoord = vec2(aTexCoord.x, 1.0 - aTexCoord.y);
+	float height = texture(earthBump, invertedTexCoord).r;
+    float radius = 5.0 + scale * height;
+    float theta = aDegree.x;
+    float phi = aDegree.y;
+
+    vec4 position;
+    position.x = radius * sin(theta) * sin(phi);
+    position.y = radius * cos(phi);
+    position.z = radius * cos(theta) * sin(phi);
+    position.w = 1.0;
+
+	mat4 MVP = VP * M;
+    gl_Position = MVP * position;
+    vNormal = mat3(transpose(inverse(M))) * position.xyz;
+    vTexCoord = aTexCoord;
+    vec3 surface = (M * position).xyz;
+    vSurfaceToLight = lightPosition - surface;
+    vSurfaceToView = viewPosition - surface;
+}
+`;
+
 const earth_frag =
 `#version 300 es
 precision mediump float;
@@ -107,42 +135,29 @@ in vec3 vNormal;
 in vec2 vTexCoord;
 in vec3 vSurfaceToLight;
 in vec3 vSurfaceToView;
-uniform sampler2D earthBump;
 uniform sampler2D earthMap;
 uniform sampler2D earthSpec;
-
 out vec4 fColor;
 void main() 
 {
-	// because v_normal is a varying it's interpolated
-	// so it will not be a uint vector. Normalizing it
-	// will make it a unit vector again
 	vec3 normal = normalize(vNormal);
 
 	vec3 surfaceToLightDirection = normalize(vSurfaceToLight);
 	vec3 surfaceToViewDirection = normalize(vSurfaceToView);
 	vec3 halfVector = normalize(surfaceToLightDirection + surfaceToViewDirection);
 
-	// compute the light by taking the dot product
-	// of the normal to the light's reverse direction
 	float light = dot(normal, surfaceToLightDirection);
 	float specular = 0.0;
 	if (light > 0.0) {
-    	specular = pow(dot(normal, halfVector), 64.0);
+		vec4 specMapColor = texture(earthSpec, vTexCoord);
+    	specular = pow(dot(normal, halfVector), 64.0) * specMapColor.r;
   	}
-	if (vTexCoord.x < 0.5)
-		fColor = vec4(1, 0, 0, 1);
-	else
-  		fColor = texture(earthMap, vTexCoord);
-  	// Lets multiply just the color portion (not the alpha)
-  	// by the light
+  	fColor = texture(earthMap, vTexCoord);
   	fColor.rgb *= light;
-  	// Just add in the specular
   	fColor.rgb += specular;
-	//fColor = vec4(0.5,1,0,1);
 }`;
-
-
+const satellitePosition = [0, 0, 10];
+let sCameraPosition = [0, 0, 0];
 function main() {
     // Getting the WebGL context
     const canvas = document.getElementById('webgl');
@@ -154,56 +169,28 @@ function main() {
 	const latitudeValue = document.getElementById('latitude-val');
 	const rotationSlider = document.getElementById('angle');
 	const rotationValue = document.getElementById('angle-val');
+	const heightSlider = document.getElementById('height');
+	const heightValue = document.getElementById('height-val');
 
 	// create Contexts
 	const helper = new Context(gl);
 	const earth = new Context(gl);
 	const satellite = new Context(gl);
 	const latitudeHelper = new Context(gl);
-	helper.mesh = createAxisLongitude(gl, 20, 10);
+	helper.mesh = createAxisLongitude(gl, 50, 10);
 	helper.program = createProgram(gl, helper_vert, helper_frag);
-	earth.mesh = createEarth(gl, 50, 5);
+	earth.mesh = createEarth(gl, 200);
 	earth.program = createProgram(gl, earth_vert, earth_frag);
 	satellite.mesh = createSatellite(gl, 10);
 	satellite.program = createProgram(gl, helper_vert, helper_frag);
-	latitudeHelper.mesh = createLatitude(gl, 20, 10);
+	latitudeHelper.mesh = createLatitude(gl, 50, 10);
 	latitudeHelper.program = createProgram(gl, helper_vert, helper_frag);
-
-	const textures = [
-		{texture:null, unit:3, image:new Image(), loaded:false},
-		{texture:null, unit:5, image:new Image(), loaded:false},
-		{texture:null, unit:7, image:new Image(), loaded:false}
-	];
-
-	function load_image(tex, src)
-    {
-        return new Promise(function(resolve, reject) {
-            tex.image.onload = () => resolve(tex);
-            tex.image.onerror = () => reject(new Error(`Error while loading image "${src}"`));
-            tex.image.src = src;
-        });
-    }
-
-    async function start() {
-        try {
-            let texes = await Promise.all([
-                load_image(textures[0], '../img/earthbump1k.jpg'),
-                load_image(textures[1], '../img/earthmap1k.jpg'),
-				load_image(textures[2], '../img/earthspec1k.jpg')]);
-            init_texture(gl, texes[0]);
-            init_texture(gl, texes[1]);
-			init_texture(gl, texes[2]);
-        } catch(e) {
-            console.log(`${e}`);
-        }
-    }
-
-	start();
 
 	// View and Projection matrix
     const VP = mat4.create();
-    mat4.perspective(VP, toRadian(30), canvas.width / canvas.height, 1, 100);
-	var cameraPosition = [30, 10, 30];
+    mat4.perspective(VP, toRadian(30), (canvas.width / 2) / canvas.height, 1, 100);
+	const cameraPosition = [30, 10, 30];
+	const lightPosition = [15, 35, 15];
 	var up = [0, 1, 0];
 	var fPosition = [0, 0, 0];
 	var viewMatrix = mat4.create();
@@ -222,48 +209,75 @@ function main() {
 	mat4.rotateY(satelliteModel, satelliteModel, toRadian(longitude));
 	mat4.rotateX(satelliteModel, satelliteModel, toRadian(latitude));
 	mat4.rotateY(latitudeModel, latitudeModel, toRadian(longitude));
+	vec3.transformMat4(sCameraPosition, satellitePosition, satelliteModel);
 
-    // build the MVP matrix
-    const earthMVP = mat4.create();
-    mat4.multiply(earthMVP, VP, earthModel);
-	const helperMVP = mat4.create();
-	mat4.multiply(helperMVP, VP, helperModel);
-	const satelliteMVP = mat4.create();
-	mat4.multiply(satelliteMVP, VP, satelliteModel);
-	const latitudeMVP = mat4.create();
-	mat4.multiply(latitudeMVP, VP, latitudeModel);
-
-	helper.program.setUniform("MVP", helperMVP, "mat4");
-	earth.program.setUniform("MVP", earthMVP, "mat4");
-	earth.program.setUniform("model", earthModel, "mat4");
-	earth.program.setUniform("lightPosition", cameraPosition, "vec3");
+	helper.program.setUniform("VP", VP, "mat4");
+	helper.program.setUniform("M", helperModel, "mat4");
+	earth.program.setUniform("VP", VP, "mat4");
+	earth.program.setUniform("M", earthModel, "mat4");
+	earth.program.setUniform("lightPosition", lightPosition, "vec3");
 	earth.program.setUniform("viewPosition", cameraPosition, "vec3");
-	satellite.program.setUniform("MVP", satelliteMVP, "mat4");
-	latitudeHelper.program.setUniform("MVP", latitudeMVP, "mat4");
+	earth.program.setUniform("scale", 1.0, "float");
+	satellite.program.setUniform("VP", VP, "mat4");
+	satellite.program.setUniform("M", satelliteModel, "mat4");
+	latitudeHelper.program.setUniform("VP", VP, "mat4");
+	latitudeHelper.program.setUniform("M", satelliteModel, "mat4");
+
+	// texturing
+	const bumpTexture = {texture:null, unit:0, image:new Image(), loaded:false};
+	const mapTexture = {texture:null, unit:1, image:new Image(), loaded:false};
+	const specTexture = {texture:null, unit:2, image:new Image(), loaded:false};
 
 	const loc_sampler_bump = gl.getUniformLocation(earth.program.program, "earthBump");
 	const loc_sampler_map = gl.getUniformLocation(earth.program.program, "earthMap");
 	const loc_sampler_spec = gl.getUniformLocation(earth.program.program, "earthSpec");
 
-	gl.useProgram(earth.program.program);
-	gl.activeTexture(gl.TEXTURE0 + textures[0].unit);
-    gl.bindTexture(gl.TEXTURE_2D, textures[0].texture);
-    gl.uniform1i(loc_sampler_bump, textures[0].unit);
-	gl.activeTexture(gl.TEXTURE0 + textures[1].unit);
-    gl.bindTexture(gl.TEXTURE_2D, textures[1].texture);
-    gl.uniform1i(loc_sampler_map, textures[1].unit);
-	gl.activeTexture(gl.TEXTURE0 + textures[2].unit);
-    gl.bindTexture(gl.TEXTURE_2D, textures[2].texture);
-    gl.uniform1i(loc_sampler_spec, textures[2].unit);
+	earth.program.set_textures = function(gl) 
+    {
+        gl.activeTexture(gl.TEXTURE0 + bumpTexture.unit);
+        gl.bindTexture(gl.TEXTURE_2D, bumpTexture.texture);
+        gl.uniform1i(loc_sampler_bump, bumpTexture.unit);
 
-    render_scene({
-		gl,
-		canvas,
-		helper,
-		latitudeHelper,
-		earth,
-		satellite
-	});
+        gl.activeTexture(gl.TEXTURE0 + mapTexture.unit);
+        gl.bindTexture(gl.TEXTURE_2D, mapTexture.texture);
+        gl.uniform1i(loc_sampler_map, mapTexture.unit);
+
+		gl.activeTexture(gl.TEXTURE0 + specTexture.unit);
+        gl.bindTexture(gl.TEXTURE_2D, specTexture.texture);
+        gl.uniform1i(loc_sampler_spec, specTexture.unit);
+    };
+
+
+	function load_image(tex, src)
+    {
+        return new Promise(function(resolve, reject) {
+            tex.image.onload = () => resolve(tex);
+            tex.image.onerror = () => reject(new Error(`Error while loading image "${src}"`));
+            tex.image.src = src;
+        });
+    }
+
+    Promise.all([
+        load_image(bumpTexture, '../img/earthbump1k.jpg'),
+        load_image(mapTexture, '../img/earthmap1k.jpg'),
+		load_image(specTexture, '../img/earthspec1k.jpg')
+    ]).then(
+        function(texes) {
+            init_texture(gl, texes[0]);
+            init_texture(gl, texes[1]);
+			init_texture(gl, texes[2]);
+			render_scene({
+				gl,
+				canvas,
+				helper,
+				latitudeHelper,
+				earth,
+				satellite
+			})
+        }
+    ).catch(
+        err => console.log(err.message)
+    );
 
 	rotationSlider.addEventListener("input", () => {
 		updateAngleAndRender();
@@ -293,6 +307,24 @@ function main() {
 		updateLatitudeAndRender();
 	});
 
+	heightSlider.addEventListener("input", () => {
+		updateHeightAndRender();
+	});
+
+	const updateHeightAndRender = () => {
+		heightValue.textContent = heightSlider.value;
+		const height = parseFloat(heightSlider.value);
+		earth.program.setUniform("scale", height / 10, "float");
+		render_scene({
+			gl,
+			canvas,
+			helper,
+			latitudeHelper,
+			earth,
+			satellite
+		});
+	}
+
 	const updateLongtitudeAndRender = () => {
 		longitudeValue.textContent = longitudeSlider.value;
 		latitudeValue.textContent = latitudeSlider.value;
@@ -302,15 +334,12 @@ function main() {
 		const satelliteModel = mat4.create();
 		mat4.rotateY(satelliteModel, satelliteModel, toRadian(longitude));
 		mat4.rotateX(satelliteModel, satelliteModel, toRadian(latitude));
-		const satelliteMVP = mat4.create();
-		mat4.multiply(satelliteMVP, VP, satelliteModel);
-		satellite.program.setUniform("MVP", satelliteMVP, "mat4");
+		satellite.program.setUniform("M", satelliteModel, "mat4");
+		vec3.transformMat4(sCameraPosition, satellitePosition, satelliteModel);
 
 		const latitudeModel = mat4.create();
 		mat4.rotateY(latitudeModel, latitudeModel, toRadian(longitude));
-		const latitudeMVP = mat4.create();
-		mat4.multiply(latitudeMVP, VP, latitudeModel);
-		latitudeHelper.program.setUniform("MVP", latitudeMVP, "mat4");
+		latitudeHelper.program.setUniform("M", latitudeModel, "mat4");
 		render_scene({
 			gl,
 			canvas,
@@ -330,9 +359,8 @@ function main() {
 		const satelliteModel = mat4.create();
 		mat4.rotateY(satelliteModel, satelliteModel, toRadian(longitude));
 		mat4.rotateX(satelliteModel, satelliteModel, toRadian(latitude));
-		const satelliteMVP = mat4.create();
-		mat4.multiply(satelliteMVP, VP, satelliteModel);
-		satellite.program.setUniform("MVP", satelliteMVP, "mat4");
+		satellite.program.setUniform("M", satelliteModel, "mat4");
+		vec3.transformMat4(sCameraPosition, satellitePosition, satelliteModel);
 		render_scene({
 			gl,
 			canvas,
@@ -348,11 +376,9 @@ function main() {
 		const angle = parseFloat(rotationSlider.value);
 		
 		const earthModel = mat4.create();
+		//mat4.rotateX(earthModel, earthModel, toRadian(-90));
 		mat4.rotateY(earthModel, earthModel, toRadian(angle));
-		const earthMVP = mat4.create();
-		mat4.multiply(earthMVP, VP, earthModel);
-		earth.program.setUniform("MVP", earthMVP, "mat4");
-		earth.program.setUniform("model", earthModel, "mat4");
+		earth.program.setUniform("M", earthModel, "mat4");
 		render_scene({
 			gl,
 			canvas,
@@ -364,20 +390,56 @@ function main() {
 	}
 }
 
-function render_scene(params)
-{
+function render_scene(params) {
     const {gl, canvas, helper, latitudeHelper, earth, satellite} = params;
 
-    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0.1, 0.1, 0.1, 1);
-    gl.enable(gl.DEPTH_TEST);
+
+    gl.viewport(0, 0, canvas.width / 2, canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-	helper.draw();
-	latitudeHelper.draw();
-	earth.draw();
-	satellite.draw();
+	const VP1 = mat4.create();
+    mat4.perspective(VP1, toRadian(30), (canvas.width / 2) / canvas.height, 1, 100);
+	const cameraPosition = [30, 10, 30];
+	const lightPosition = [15, 35, 15];
+	var up = [0, 1, 0];
+	var fPosition = [0, 0, 0];
+	var viewMatrix = mat4.create();
+    mat4.lookAt(viewMatrix, cameraPosition, fPosition, up);
+	mat4.multiply(VP1, VP1, viewMatrix);
+	earth.program.setUniform("VP", VP1, "mat4");
+	helper.program.setUniform("VP", VP1, "mat4");
+	satellite.program.setUniform("VP", VP1, "mat4");
+	latitudeHelper.program.setUniform("VP", VP1, "mat4");
+
+    gl.enable(gl.DEPTH_TEST);
+    helper.draw();
+    latitudeHelper.draw();
+    earth.draw();
+    satellite.draw();
+
+    gl.viewport(canvas.width / 2, 0, canvas.width / 2, canvas.height);
+	const VP = mat4.create();
+	console.log(satellitePosition);
+    mat4.perspective(VP, toRadian(40), (canvas.width / 2) / canvas.height, 1, 100);
+	var up = [0, 1, 0];
+	var fPosition = [0, 0, 0];
+	var viewMatrix = mat4.create();
+    mat4.lookAt(viewMatrix, sCameraPosition, fPosition, up);
+	mat4.multiply(VP, VP, viewMatrix);
+
+	earth.program.setUniform("VP", VP, "mat4");
+	helper.program.setUniform("VP", VP, "mat4");
+	satellite.program.setUniform("VP", VP, "mat4");
+	latitudeHelper.program.setUniform("VP", VP, "mat4");
+
+    gl.enable(gl.DEPTH_TEST);
+    helper.draw();
+    latitudeHelper.draw();
+    earth.draw();
+    satellite.draw();
 }
+
 
 function createProgram(gl, src_vert, src_frag)
 {
@@ -435,10 +497,11 @@ function init_texture(gl, tex)
 {
     tex.texture = gl.createTexture(); 
     gl.bindTexture(gl.TEXTURE_2D, tex.texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tex.image);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);// Flip the image's y-axis
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tex.image);
-    return true;
+    gl.bindTexture(gl.TEXTURE_2D, null);
+	return true;
 }
 
 main();
