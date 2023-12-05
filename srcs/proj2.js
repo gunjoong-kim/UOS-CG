@@ -6,6 +6,44 @@ const loc_aColor = 1;
 const loc_aNormal = 2;
 const loc_aTexCoord = 3;
 
+export class Context 
+{
+	constructor(gl, program, mesh)
+	{
+		this.gl = gl;
+		this.program = program;
+		this.mesh = mesh;
+	}
+	draw()
+	{
+		this.gl.useProgram(this.program.program);
+    	this.gl.bindVertexArray(this.mesh.vao);
+    	this.gl.drawElements(this.mesh.drawMode, this.mesh.indiceCnt, this.gl.UNSIGNED_SHORT, 0);
+    	this.gl.bindVertexArray(null);
+		this.gl.useProgram(null);
+	}
+}
+
+export class Program
+{
+	constructor(gl, program)
+	{
+		this.gl = gl;
+		this.program = program;
+	}
+	setUniform(name, value, type)
+	{
+		this.gl.useProgram(this.program);
+		const location = this.gl.getUniformLocation(this.program, name);
+		if (type === "mat4")
+			this.gl.uniformMatrix4fv(location, false, value);
+		else if (type === "vec3")
+			this.gl.uniform3fv(location, value);
+		else
+			console.log("No matching types...");
+	}
+}
+
 export class Mesh
 {
 	constructor(gl, vao, indiceCnt, drawMode)
@@ -15,23 +53,6 @@ export class Mesh
 		this.indiceCnt = indiceCnt;
 		this.drawMode = drawMode;
 		this.program = null;
-		this.uniforms = {MVP:{location:null, value: null}};
-	}
-
-	setProgram(program)
-	{
-		this.program = program;
-	}
-
-	setDrawMode(drawMode)
-	{
-		this.drawMode = drawMode;
-	}
-
-	setUniform(name, value)
-	{
-		this.uniforms.MVP.location = this.gl.getUniformLocation(this.program, name);
-		this.uniforms.MVP.value = value;
 	}
 }
 
@@ -60,32 +81,69 @@ void main()
 const earth_vert = 
 `#version 300 es
 layout(location=${loc_aPosition}) in vec4 aPosition;
-layout(location=${loc_aNormal}) in vec4 aNormal;
+layout(location=${loc_aNormal}) in vec3 aNormal;
 layout(location=${loc_aTexCoord}) in vec2 aTexCoord;
+uniform mat4 model;
 uniform mat4 MVP;
-out vec4 vNormal;
+uniform vec3 lightPosition;
+uniform vec3 viewPosition;
+out vec3 vNormal;
 out vec2 vTexCoord;
+out vec3 vSurfaceToLight;
+out vec3 vSurfaceToView;
 void main() 
 {
     gl_Position = MVP * aPosition;
-    vNormal = aNormal;
+    vNormal = mat3(transpose(inverse(model))) * aNormal;
 	vTexCoord = aTexCoord;
+	vec3 surface = (model * aPosition).xyz;
+	vSurfaceToLight = lightPosition - surface;
+	vSurfaceToView = viewPosition - surface;
 }`;
 const earth_frag =
 `#version 300 es
 precision mediump float;
-in vec4 vNormal;
+in vec3 vNormal;
 in vec2 vTexCoord;
+in vec3 vSurfaceToLight;
+in vec3 vSurfaceToView;
+uniform sampler2D earthBump;
+uniform sampler2D earthMap;
+uniform sampler2D earthSpec;
+
 out vec4 fColor;
 void main() 
 {
-    fColor = vec4(0.5,1,0,1);
+	// because v_normal is a varying it's interpolated
+	// so it will not be a uint vector. Normalizing it
+	// will make it a unit vector again
+	vec3 normal = normalize(vNormal);
+
+	vec3 surfaceToLightDirection = normalize(vSurfaceToLight);
+	vec3 surfaceToViewDirection = normalize(vSurfaceToView);
+	vec3 halfVector = normalize(surfaceToLightDirection + surfaceToViewDirection);
+
+	// compute the light by taking the dot product
+	// of the normal to the light's reverse direction
+	float light = dot(normal, surfaceToLightDirection);
+	float specular = 0.0;
+	if (light > 0.0) {
+    	specular = pow(dot(normal, halfVector), 64.0);
+  	}
+	if (vTexCoord.x < 0.5)
+		fColor = vec4(1, 0, 0, 1);
+	else
+  		fColor = texture(earthMap, vTexCoord);
+  	// Lets multiply just the color portion (not the alpha)
+  	// by the light
+  	fColor.rgb *= light;
+  	// Just add in the specular
+  	fColor.rgb += specular;
+	//fColor = vec4(0.5,1,0,1);
 }`;
 
 
 function main() {
-
- 
     // Getting the WebGL context
     const canvas = document.getElementById('webgl');
     const gl = canvas.getContext("webgl2");
@@ -96,18 +154,51 @@ function main() {
 	const latitudeValue = document.getElementById('latitude-val');
 	const rotationSlider = document.getElementById('angle');
 	const rotationValue = document.getElementById('angle-val');
-    const earth_prog = createProgram(gl, earth_vert, earth_frag);
-	const helper_prog = createProgram(gl, helper_vert, helper_frag);
 
-	// create object
-	const helper = createAxisLongitude(gl, 20, 10);
-	helper.program = helper_prog;
-	const earth = createEarth(gl, 50, 5);
-	earth.program = earth_prog;
-	const satellite = createSatellite(gl, 10);
-	satellite.program = helper_prog;
-	const latitudeHelper = createLatitude(gl, 20, 10);
-	latitudeHelper.program = helper_prog;
+	// create Contexts
+	const helper = new Context(gl);
+	const earth = new Context(gl);
+	const satellite = new Context(gl);
+	const latitudeHelper = new Context(gl);
+	helper.mesh = createAxisLongitude(gl, 20, 10);
+	helper.program = createProgram(gl, helper_vert, helper_frag);
+	earth.mesh = createEarth(gl, 50, 5);
+	earth.program = createProgram(gl, earth_vert, earth_frag);
+	satellite.mesh = createSatellite(gl, 10);
+	satellite.program = createProgram(gl, helper_vert, helper_frag);
+	latitudeHelper.mesh = createLatitude(gl, 20, 10);
+	latitudeHelper.program = createProgram(gl, helper_vert, helper_frag);
+
+	const textures = [
+		{texture:null, unit:3, image:new Image(), loaded:false},
+		{texture:null, unit:5, image:new Image(), loaded:false},
+		{texture:null, unit:7, image:new Image(), loaded:false}
+	];
+
+	function load_image(tex, src)
+    {
+        return new Promise(function(resolve, reject) {
+            tex.image.onload = () => resolve(tex);
+            tex.image.onerror = () => reject(new Error(`Error while loading image "${src}"`));
+            tex.image.src = src;
+        });
+    }
+
+    async function start() {
+        try {
+            let texes = await Promise.all([
+                load_image(textures[0], '../img/earthbump1k.jpg'),
+                load_image(textures[1], '../img/earthmap1k.jpg'),
+				load_image(textures[2], '../img/earthspec1k.jpg')]);
+            init_texture(gl, texes[0]);
+            init_texture(gl, texes[1]);
+			init_texture(gl, texes[2]);
+        } catch(e) {
+            console.log(`${e}`);
+        }
+    }
+
+	start();
 
 	// View and Projection matrix
     const VP = mat4.create();
@@ -142,10 +233,28 @@ function main() {
 	const latitudeMVP = mat4.create();
 	mat4.multiply(latitudeMVP, VP, latitudeModel);
 
-	helper.setUniform("MVP", helperMVP);
-	earth.setUniform("MVP", earthMVP);
-	satellite.setUniform("MVP", satelliteMVP);
-	latitudeHelper.setUniform("MVP", latitudeMVP);
+	helper.program.setUniform("MVP", helperMVP, "mat4");
+	earth.program.setUniform("MVP", earthMVP, "mat4");
+	earth.program.setUniform("model", earthModel, "mat4");
+	earth.program.setUniform("lightPosition", cameraPosition, "vec3");
+	earth.program.setUniform("viewPosition", cameraPosition, "vec3");
+	satellite.program.setUniform("MVP", satelliteMVP, "mat4");
+	latitudeHelper.program.setUniform("MVP", latitudeMVP, "mat4");
+
+	const loc_sampler_bump = gl.getUniformLocation(earth.program.program, "earthBump");
+	const loc_sampler_map = gl.getUniformLocation(earth.program.program, "earthMap");
+	const loc_sampler_spec = gl.getUniformLocation(earth.program.program, "earthSpec");
+
+	gl.useProgram(earth.program.program);
+	gl.activeTexture(gl.TEXTURE0 + textures[0].unit);
+    gl.bindTexture(gl.TEXTURE_2D, textures[0].texture);
+    gl.uniform1i(loc_sampler_bump, textures[0].unit);
+	gl.activeTexture(gl.TEXTURE0 + textures[1].unit);
+    gl.bindTexture(gl.TEXTURE_2D, textures[1].texture);
+    gl.uniform1i(loc_sampler_map, textures[1].unit);
+	gl.activeTexture(gl.TEXTURE0 + textures[2].unit);
+    gl.bindTexture(gl.TEXTURE_2D, textures[2].texture);
+    gl.uniform1i(loc_sampler_spec, textures[2].unit);
 
     render_scene({
 		gl,
@@ -195,13 +304,13 @@ function main() {
 		mat4.rotateX(satelliteModel, satelliteModel, toRadian(latitude));
 		const satelliteMVP = mat4.create();
 		mat4.multiply(satelliteMVP, VP, satelliteModel);
-		satellite.uniforms.MVP.value = satelliteMVP;
+		satellite.program.setUniform("MVP", satelliteMVP, "mat4");
 
 		const latitudeModel = mat4.create();
 		mat4.rotateY(latitudeModel, latitudeModel, toRadian(longitude));
 		const latitudeMVP = mat4.create();
 		mat4.multiply(latitudeMVP, VP, latitudeModel);
-		latitudeHelper.uniforms.MVP.value = latitudeMVP;
+		latitudeHelper.program.setUniform("MVP", latitudeMVP, "mat4");
 		render_scene({
 			gl,
 			canvas,
@@ -223,7 +332,7 @@ function main() {
 		mat4.rotateX(satelliteModel, satelliteModel, toRadian(latitude));
 		const satelliteMVP = mat4.create();
 		mat4.multiply(satelliteMVP, VP, satelliteModel);
-		satellite.uniforms.MVP.value = satelliteMVP;
+		satellite.program.setUniform("MVP", satelliteMVP, "mat4");
 		render_scene({
 			gl,
 			canvas,
@@ -242,7 +351,8 @@ function main() {
 		mat4.rotateY(earthModel, earthModel, toRadian(angle));
 		const earthMVP = mat4.create();
 		mat4.multiply(earthMVP, VP, earthModel);
-		earth.uniforms.MVP.value = earthMVP;
+		earth.program.setUniform("MVP", earthMVP, "mat4");
+		earth.program.setUniform("model", earthModel, "mat4");
 		render_scene({
 			gl,
 			canvas,
@@ -263,29 +373,10 @@ function render_scene(params)
     gl.enable(gl.DEPTH_TEST);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    gl.useProgram(helper.program);
-    gl.uniformMatrix4fv(helper.uniforms.MVP.location, false, helper.uniforms.MVP.value);
-    gl.bindVertexArray(helper.vao);
-    gl.drawElements(helper.drawMode, helper.indiceCnt, gl.UNSIGNED_SHORT, 0);
-    gl.bindVertexArray(null);
-
-	gl.useProgram(earth.program);
-    gl.uniformMatrix4fv(earth.uniforms.MVP.location, false, earth.uniforms.MVP.value);
-    gl.bindVertexArray(earth.vao);
-    gl.drawElements(earth.drawMode, earth.indiceCnt, gl.UNSIGNED_SHORT, 0);
-    gl.bindVertexArray(null);
-
-	gl.useProgram(satellite.program);
-    gl.uniformMatrix4fv(satellite.uniforms.MVP.location, false, satellite.uniforms.MVP.value);
-    gl.bindVertexArray(satellite.vao);
-    gl.drawElements(satellite.drawMode, satellite.indiceCnt, gl.UNSIGNED_SHORT, 0);
-    gl.bindVertexArray(null);
-
-	gl.useProgram(latitudeHelper.program);
-    gl.uniformMatrix4fv(latitudeHelper.uniforms.MVP.location, false, latitudeHelper.uniforms.MVP.value);
-    gl.bindVertexArray(latitudeHelper.vao);
-    gl.drawElements(latitudeHelper.drawMode, latitudeHelper.indiceCnt, gl.UNSIGNED_SHORT, 0);
-    gl.bindVertexArray(null);
+	helper.draw();
+	latitudeHelper.draw();
+	earth.draw();
+	satellite.draw();
 }
 
 function createProgram(gl, src_vert, src_frag)
@@ -337,7 +428,17 @@ function createProgram(gl, src_vert, src_frag)
         gl.deleteShader(h_frag);
         return null;
     }
-    return h_prog;
+    return new Program(gl, h_prog);
+}
+
+function init_texture(gl, tex)
+{
+    tex.texture = gl.createTexture(); 
+    gl.bindTexture(gl.TEXTURE_2D, tex.texture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);// Flip the image's y-axis
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tex.image);
+    return true;
 }
 
 main();
