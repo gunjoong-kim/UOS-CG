@@ -6,7 +6,7 @@ import {toRadian} from "./lib/gl-matrix/common.js";
 
 const BYTE_SIZE_OF_FLOAT32 = 4;
 
-export function createEarth(gl, SPHERE_DIV, loc_aTexCoord=3, loc_aDegree=4) 
+export function createEarth(gl, name, SPHERE_DIV, loc_aTexCoord=3, loc_aDegree=4) 
 { // Create a sphere
     let vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
@@ -78,10 +78,10 @@ export function createEarth(gl, SPHERE_DIV, loc_aTexCoord=3, loc_aDegree=4)
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 
-	return new Mesh(gl, vao, indices.length, gl.TRIANGLES);
+	return new Mesh(gl, name,  vao, indices.length, gl.TRIANGLES);
 }
 
-export function createAxisLongitude(gl, SPHERE_DIV, radius = 10, loc_aPosition=0, loc_aColor=1)
+export function createAxisLongitude(gl, name, SPHERE_DIV, radius = 10, loc_aPosition=0, loc_aColor=1)
 {
 	let vertex = [
 		//axis x
@@ -153,10 +153,10 @@ export function createAxisLongitude(gl, SPHERE_DIV, radius = 10, loc_aPosition=0
 	gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 	
-	return new Mesh(gl, vao, indices.length, gl.LINES);
+	return new Mesh(gl, name, vao, indices.length, gl.LINES);
 }
 
-export function createSatellite(gl, radius = 10, loc_aPosition=0, loc_aColor=1)
+export function createSatellite(gl, name, radius = 10, loc_aPosition=0, loc_aColor=1)
 {
 	const vertex = [
 		0.0, 0.0, 0.0, 1.0 ,0.08, 0.6,
@@ -183,10 +183,10 @@ export function createSatellite(gl, radius = 10, loc_aPosition=0, loc_aColor=1)
 	gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 
-	return new Mesh(gl, vao, indices.length, gl.LINES);
+	return new Mesh(gl, name, vao, indices.length, gl.LINES);
 }
 
-export function createLatitude(gl, SPHERE_DIV, radius = 10, loc_aPosition=0, loc_aColor=1)
+export function createLatitude(gl, name, SPHERE_DIV, radius = 10, loc_aPosition=0, loc_aColor=1)
 {
 	let i;
 	let theta, sin_theta, cos_theta;
@@ -237,6 +237,5 @@ export function createLatitude(gl, SPHERE_DIV, radius = 10, loc_aPosition=0, loc
 	gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 	
-	return new Mesh(gl, vao, indices.length, gl.LINES);
+	return new Mesh(gl, name, vao, indices.length, gl.LINES);
 }
-

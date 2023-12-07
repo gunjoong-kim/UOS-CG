@@ -9,24 +9,37 @@ const loc_aNormal = 2;
 const loc_aTexCoord = 3;
 const loc_aDegree = 4;
 
+const axisName = "AXIS";
+const earthName = "NAME";
+const satelliteName = "SATELLITE";
+const latitudeName = "LATITUDE";
+
+const cameraPositionW = [30, 10, 30];
+const lightPositionW = [15, 35, 15];
+
 export class Context 
 {
-	constructor(gl, program, mesh)
+	constructor(gl, program)
 	{
 		this.gl = gl;
 		this.program = program;
-		this.mesh = mesh;
+		this.meshs = [];
 	}
 	draw()
 	{
 		this.gl.useProgram(this.program.program);
-    	this.gl.bindVertexArray(this.mesh.vao);
-		if (this.program.set_textures != null)
+		this.program.setUniform("VP", this.program.VP, "mat4");
+		for (const mesh of this.meshs)
 		{
-			this.program.set_textures(this.gl);
+    		this.gl.bindVertexArray(mesh.vao);
+			this.program.setUniform("M", mesh.M, "mat4");
+			if (this.program.setTextures != null)
+			{
+				this.program.setTextures(this.gl);
+			}
+    		this.gl.drawElements(mesh.drawMode, mesh.indiceCnt, this.gl.UNSIGNED_SHORT, 0);
+    		this.gl.bindVertexArray(null);
 		}
-    	this.gl.drawElements(this.mesh.drawMode, this.mesh.indiceCnt, this.gl.UNSIGNED_SHORT, 0);
-    	this.gl.bindVertexArray(null);
 		this.gl.useProgram(null);
 	}
 }
@@ -37,6 +50,7 @@ export class Program
 	{
 		this.gl = gl;
 		this.program = program;
+		this.VP = null;
 	}
 	setUniform(name, value, type)
 	{
@@ -48,6 +62,8 @@ export class Program
 			this.gl.uniform3fv(location, value);
 		else if (type === "float")
 			this.gl.uniform1f(location, value);
+		else if (type === "int")
+			this.gl.uniform1i(location, value);
 		else
 			console.log("No matching types...");
 	}
@@ -55,13 +71,14 @@ export class Program
 
 export class Mesh
 {
-	constructor(gl, vao, indiceCnt, drawMode)
+	constructor(gl, name, vao, indiceCnt, drawMode)
 	{
+		this.name = name;
 		this.gl = gl;
 		this.vao = vao;
 		this.indiceCnt = indiceCnt;
 		this.drawMode = drawMode;
-		this.program = null;
+		this.M = null;
 	}
 }
 
@@ -89,7 +106,7 @@ void main()
 //    fColor = vec4(1,0,0,1);
 }`;
 
-const earth_vert = 
+const earth_vert =
 `#version 300 es
 layout(location=${loc_aDegree}) in vec2 aDegree;
 layout(location=${loc_aTexCoord}) in vec2 aTexCoord;
@@ -99,32 +116,69 @@ uniform vec3 lightPosition;
 uniform vec3 viewPosition;
 uniform sampler2D earthBump;
 uniform float scale;
+uniform vec3 spotLightPosition;
 out vec3 vNormal;
 out vec2 vTexCoord;
 out vec3 vSurfaceToLight;
 out vec3 vSurfaceToView;
+out vec3 vSurfaceToSpot;
+out vec3 vSpotDirection;
+
+const float PI = 3.141592653589793;
 
 void main() 
 {
-	vec2 invertedTexCoord = vec2(aTexCoord.x, 1.0 - aTexCoord.y);
-	float height = texture(earthBump, invertedTexCoord).r;
+    vec2 invertedTexCoord = vec2(aTexCoord.x, 1.0 - aTexCoord.y);
+    float height = texture(earthBump, invertedTexCoord).r;
     float radius = 5.0 + scale * height;
     float theta = aDegree.x;
     float phi = aDegree.y;
+	float sinTheta = sin(theta);
+	float sinPhi = sin(phi);
+	float cosTheta = cos(theta);
+	float cosPhi = cos(phi);
+
+	float epsilon = 0.0001;
+	vec2 coord1 = vec2(invertedTexCoord.x + epsilon, invertedTexCoord.y);
+	vec2 coord2 = vec2(invertedTexCoord.x - epsilon, invertedTexCoord.y);
+	vec2 coord3 = vec2(invertedTexCoord.x, invertedTexCoord.y + epsilon);
+	vec2 coord4 = vec2(invertedTexCoord.x, invertedTexCoord.y - epsilon);
+
+	float drds = (scale * (texture(earthBump, coord1).r - texture(earthBump, coord2).r)) / (2.0 * epsilon);
+	float drdt = (scale * (texture(earthBump, coord3).r - texture(earthBump, coord4).r)) / (2.0 * epsilon);
+
+	vec3 dpds = vec3(
+		2.0 * PI * (5.0 * cosTheta * sinPhi) + drds * (sinTheta * sinPhi), // y
+		drds * cosPhi, // z
+		2.0 * PI * (-5.0 * sinTheta * sinPhi) + drds * (cosTheta * sinPhi) // x
+	);
+	
+	vec3 dpdt = vec3(
+		-PI * (5.0 * sinTheta * cosPhi) + drdt * (sinTheta * sinPhi), // y
+		PI * (5.0 * sinPhi) + drdt * cosPhi, // z
+		-PI * (5.0 * cosTheta * cosPhi) + drdt * (cosTheta * sinPhi) // x
+	);
+
+	vec3 normal = normalize(cross(dpds, dpdt));
+
 
     vec4 position;
-    position.x = radius * sin(theta) * sin(phi);
-    position.y = radius * cos(phi);
-    position.z = radius * cos(theta) * sin(phi);
+    position.x = radius * sinTheta * sinPhi;
+    position.y = radius * cosPhi;
+    position.z = radius * cosTheta * sinPhi;
     position.w = 1.0;
 
-	mat4 MVP = VP * M;
+	//vec3 normal = position.xyz;
+
+    mat4 MVP = VP * M;
     gl_Position = MVP * position;
-    vNormal = mat3(transpose(inverse(M))) * position.xyz;
+    vNormal = mat3(transpose(inverse(M))) * normal;
     vTexCoord = aTexCoord;
     vec3 surface = (M * position).xyz;
     vSurfaceToLight = lightPosition - surface;
     vSurfaceToView = viewPosition - surface;
+    vSurfaceToSpot = spotLightPosition - surface;
+    vSpotDirection = normalize(spotLightPosition - surface);
 }
 `;
 
@@ -135,29 +189,56 @@ in vec3 vNormal;
 in vec2 vTexCoord;
 in vec3 vSurfaceToLight;
 in vec3 vSurfaceToView;
+in vec3 vSurfaceToSpot;
+in vec3 vSpotDirection;
+uniform float outerAngle;
 uniform sampler2D earthMap;
 uniform sampler2D earthSpec;
+uniform int turnSpot;
+uniform int turnLight;
 out vec4 fColor;
+
 void main() 
 {
-	vec3 normal = normalize(vNormal);
+	float outer = cos(radians(outerAngle));
+	float inner = cos(radians(0.0));
+    vec3 normal = normalize(vNormal);
+    vec3 surfaceToLightDirection = normalize(vSurfaceToLight);
+    vec3 surfaceToViewDirection = normalize(vSurfaceToView);
+    vec3 surfaceToSpotDirection = normalize(vSurfaceToSpot);
+    vec3 halfVector = normalize(surfaceToLightDirection + surfaceToViewDirection);
+    vec3 halfVectorSpot = normalize(surfaceToSpotDirection + surfaceToViewDirection);
 
-	vec3 surfaceToLightDirection = normalize(vSurfaceToLight);
-	vec3 surfaceToViewDirection = normalize(vSurfaceToView);
-	vec3 halfVector = normalize(surfaceToLightDirection + surfaceToViewDirection);
+    vec4 specMapColor = texture(earthSpec, vTexCoord);
 
-	float light = dot(normal, surfaceToLightDirection);
-	float specular = 0.0;
-	if (light > 0.0) {
-		vec4 specMapColor = texture(earthSpec, vTexCoord);
-    	specular = pow(dot(normal, halfVector), 64.0) * specMapColor.r;
-  	}
-  	fColor = texture(earthMap, vTexCoord);
-  	fColor.rgb *= light;
-  	fColor.rgb += specular;
-}`;
-const satellitePosition = [0, 0, 10];
-let sCameraPosition = [0, 0, 0];
+    float dotFromDirection = dot(normal, vSpotDirection);
+    float inLight = smoothstep(outer, inner, dotFromDirection);
+    inLight *= dot(normal, surfaceToSpotDirection);
+	inLight = clamp(inLight, 0.0, 1.0);
+    float inSpec = pow(dot(normal, halfVectorSpot), 64.0) * specMapColor.r;
+
+    float light = dot(normal, surfaceToLightDirection);
+	light = clamp(light, 0.0, 1.0);
+    float specular = 0.0;
+    specular = pow(dot(normal, halfVector), 64.0) * specMapColor.r;
+
+	if (turnSpot == 0)
+	{
+		inLight = 0.0;
+		inSpec = 0.0;
+	}
+	if (turnLight == 0)
+	{
+		light = 0.0;
+		specular = 0.0;
+	}
+    float totalLight = light + inLight;
+    fColor = texture(earthMap, vTexCoord);
+    fColor.rgb *= totalLight;
+    fColor.rgb += specular + inSpec;
+}
+`;
+
 function main() {
     // Getting the WebGL context
     const canvas = document.getElementById('webgl');
@@ -171,31 +252,11 @@ function main() {
 	const rotationValue = document.getElementById('angle-val');
 	const heightSlider = document.getElementById('height');
 	const heightValue = document.getElementById('height-val');
-
-	// create Contexts
-	const helper = new Context(gl);
-	const earth = new Context(gl);
-	const satellite = new Context(gl);
-	const latitudeHelper = new Context(gl);
-	helper.mesh = createAxisLongitude(gl, 50, 10);
-	helper.program = createProgram(gl, helper_vert, helper_frag);
-	earth.mesh = createEarth(gl, 200);
-	earth.program = createProgram(gl, earth_vert, earth_frag);
-	satellite.mesh = createSatellite(gl, 10);
-	satellite.program = createProgram(gl, helper_vert, helper_frag);
-	latitudeHelper.mesh = createLatitude(gl, 50, 10);
-	latitudeHelper.program = createProgram(gl, helper_vert, helper_frag);
-
-	// View and Projection matrix
-    const VP = mat4.create();
-    mat4.perspective(VP, toRadian(30), (canvas.width / 2) / canvas.height, 1, 100);
-	const cameraPosition = [30, 10, 30];
-	const lightPosition = [15, 35, 15];
-	var up = [0, 1, 0];
-	var fPosition = [0, 0, 0];
-	var viewMatrix = mat4.create();
-    mat4.lookAt(viewMatrix, cameraPosition, fPosition, up);
-	mat4.multiply(VP, VP, viewMatrix);
+	const spotSlider = document.getElementById('cutoff-angle');
+	const spotSliderValue = document.getElementById('cutoff-angle-val');
+	const lightCheck = document.getElementById('light-point');
+	const spotCheck = document.getElementById('light-spot');
+	const messageBox = document.getElementById('message');
 
     // Model transformation (might be different for each object to render)
 	const longitude = parseFloat(longitudeSlider.value);
@@ -209,19 +270,27 @@ function main() {
 	mat4.rotateY(satelliteModel, satelliteModel, toRadian(longitude));
 	mat4.rotateX(satelliteModel, satelliteModel, toRadian(latitude));
 	mat4.rotateY(latitudeModel, latitudeModel, toRadian(longitude));
-	vec3.transformMat4(sCameraPosition, satellitePosition, satelliteModel);
 
-	helper.program.setUniform("VP", VP, "mat4");
-	helper.program.setUniform("M", helperModel, "mat4");
-	earth.program.setUniform("VP", VP, "mat4");
-	earth.program.setUniform("M", earthModel, "mat4");
-	earth.program.setUniform("lightPosition", lightPosition, "vec3");
-	earth.program.setUniform("viewPosition", cameraPosition, "vec3");
-	earth.program.setUniform("scale", 1.0, "float");
-	satellite.program.setUniform("VP", VP, "mat4");
-	satellite.program.setUniform("M", satelliteModel, "mat4");
-	latitudeHelper.program.setUniform("VP", VP, "mat4");
-	latitudeHelper.program.setUniform("M", satelliteModel, "mat4");
+	// create Contexts
+	const helper = new Context(gl);
+	const earth = new Context(gl);
+
+	helper.program = createProgram(gl, helper_vert, helper_frag);
+	earth.program = createProgram(gl, earth_vert, earth_frag);
+
+	const meshAxis = createAxisLongitude(gl, axisName, 50, 10);
+	meshAxis.M = helperModel;
+	const meshEarth = createEarth(gl, earthName, 250);
+	meshEarth.M = earthModel;
+	const meshSatellite = createSatellite(gl, satelliteName, 10);
+	meshSatellite.M = satelliteModel;
+	const meshLatitude = createLatitude(gl, latitudeName, 50, 10);
+	meshLatitude.M = latitudeModel;
+
+	helper.meshs.push(meshAxis);
+	helper.meshs.push(meshLatitude);
+	helper.meshs.push(meshSatellite);
+	earth.meshs.push(meshEarth);
 
 	// texturing
 	const bumpTexture = {texture:null, unit:0, image:new Image(), loaded:false};
@@ -232,7 +301,16 @@ function main() {
 	const loc_sampler_map = gl.getUniformLocation(earth.program.program, "earthMap");
 	const loc_sampler_spec = gl.getUniformLocation(earth.program.program, "earthSpec");
 
-	earth.program.set_textures = function(gl) 
+	const scale = parseFloat(heightSlider.value) / 20;
+	const spotAngle = parseFloat(spotSlider.value);
+	earth.program.setUniform("turnLight", 1, "int");
+	earth.program.setUniform("turnSpot", 1, "int");
+	earth.program.setUniform("outerAngle", spotAngle, "float");
+	earth.program.setUniform("lightPosition", lightPositionW, "vec3");
+	earth.program.setUniform("viewPosition", cameraPositionW, "vec3");
+	earth.program.setUniform("scale", scale, "float");
+
+	earth.program.setTextures = function(gl)
     {
         gl.activeTexture(gl.TEXTURE0 + bumpTexture.unit);
         gl.bindTexture(gl.TEXTURE_2D, bumpTexture.texture);
@@ -246,7 +324,6 @@ function main() {
         gl.bindTexture(gl.TEXTURE_2D, specTexture.texture);
         gl.uniform1i(loc_sampler_spec, specTexture.unit);
     };
-
 
 	function load_image(tex, src)
     {
@@ -270,43 +347,91 @@ function main() {
 				gl,
 				canvas,
 				helper,
-				latitudeHelper,
 				earth,
-				satellite
 			})
         }
     ).catch(
         err => console.log(err.message)
     );
 
+	lightCheck.addEventListener("input", () => {
+		const value = lightCheck.value;
+		if (value == "off")
+		{
+			earth.program.setUniform("turnLight", 1, "int");
+			lightCheck.value = "on";
+		}
+		else
+		{
+			earth.program.setUniform("turnLight", 0, "int");
+			lightCheck.value = "off";
+		}
+		render_scene({
+			gl,
+			canvas,
+			helper,
+			earth,
+		});
+	})
+
+	spotCheck.addEventListener("input", () => {
+		const value = spotCheck.value;
+		if (value == "off")
+		{
+			earth.program.setUniform("turnSpot", 1, "int");
+			spotCheck.value = "on";
+		}
+		else
+		{
+			earth.program.setUniform("turnSpot", 0, "int");
+			spotCheck.value = "off";
+		}
+		render_scene({
+			gl,
+			canvas,
+			helper,
+			earth,
+		});
+	})
+
 	rotationSlider.addEventListener("input", () => {
 		updateAngleAndRender();
+	})
+
+	spotSlider.addEventListener("input", () => {
+		updateSpotAndRender();
 	})
 
 	longitudeSlider.addEventListener("input", () => {
 		updateLongtitudeAndRender();
 	});
-	longitudeSlider.addEventListener("keydown", (event) => {
-		if (event.key === "ArrowRight" && parseFloat(slider.value) < parseFloat(slider.max)) {
-			slider.stepUp();
-		} else if (event.key === "ArrowLeft" && parseFloat(slider.value) > parseFloat(slider.min)) {
-			slider.stepDown();
+	window.addEventListener("keydown", (event) => {
+		if (event.key === "ArrowRight" && parseFloat(longitudeSlider.value) < parseFloat(longitudeSlider.max)) {
+			longitudeSlider.stepUp();
+			messageBox.textContent = "Right arrow is pressed.";
+			updateLongtitudeAndRender();
+		} else if (event.key === "ArrowLeft" && parseFloat(longitudeSlider.value) > parseFloat(longitudeSlider.min)) {
+			longitudeSlider.stepDown();
+			messageBox.textContent = "Left arrow is pressed.";
+			updateLongtitudeAndRender();
 		}
-		updateLongtitudeAndRender();
 	});
-
+	
 	latitudeSlider.addEventListener("input", () => {
 		updateLatitudeAndRender();
 	});
-	latitudeSlider.addEventListener("keydown", (event) => {
-		if (event.key === "ArrowRight" && parseFloat(slider.value) < parseFloat(slider.max)) {
-			slider.stepUp();
-		} else if (event.key === "ArrowLeft" && parseFloat(slider.value) > parseFloat(slider.min)) {
-			slider.stepDown();
+	
+	window.addEventListener("keydown", (event) => {
+		if (event.key === "ArrowUp" && parseFloat(latitudeSlider.value) < parseFloat(latitudeSlider.max)) {
+			latitudeSlider.stepUp();
+			messageBox.textContent = "Up arrow is pressed.";
+			updateLatitudeAndRender();
+		} else if (event.key === "ArrowDown" && parseFloat(latitudeSlider.value) > parseFloat(latitudeSlider.min)) {
+			latitudeSlider.stepDown();
+			messageBox.textContent = "Down arrow is pressed.";
+			updateLatitudeAndRender();
 		}
-		updateLatitudeAndRender();
 	});
-
 	heightSlider.addEventListener("input", () => {
 		updateHeightAndRender();
 	});
@@ -314,14 +439,12 @@ function main() {
 	const updateHeightAndRender = () => {
 		heightValue.textContent = heightSlider.value;
 		const height = parseFloat(heightSlider.value);
-		earth.program.setUniform("scale", height / 10, "float");
+		earth.program.setUniform("scale", height / 20, "float");
 		render_scene({
 			gl,
 			canvas,
 			helper,
-			latitudeHelper,
 			earth,
-			satellite
 		});
 	}
 
@@ -334,19 +457,18 @@ function main() {
 		const satelliteModel = mat4.create();
 		mat4.rotateY(satelliteModel, satelliteModel, toRadian(longitude));
 		mat4.rotateX(satelliteModel, satelliteModel, toRadian(latitude));
-		satellite.program.setUniform("M", satelliteModel, "mat4");
-		vec3.transformMat4(sCameraPosition, satellitePosition, satelliteModel);
+		const index = helper.meshs.findIndex(mesh => mesh.name === satelliteName);
+		helper.meshs[index].M = satelliteModel;
 
 		const latitudeModel = mat4.create();
 		mat4.rotateY(latitudeModel, latitudeModel, toRadian(longitude));
-		latitudeHelper.program.setUniform("M", latitudeModel, "mat4");
+		const index1 = helper.meshs.findIndex(mesh => mesh.name === latitudeName);
+		helper.meshs[index1].M = latitudeModel;
 		render_scene({
 			gl,
 			canvas,
 			helper,
-			latitudeHelper,
 			earth,
-			satellite
 		});
 	};
 
@@ -359,85 +481,82 @@ function main() {
 		const satelliteModel = mat4.create();
 		mat4.rotateY(satelliteModel, satelliteModel, toRadian(longitude));
 		mat4.rotateX(satelliteModel, satelliteModel, toRadian(latitude));
-		satellite.program.setUniform("M", satelliteModel, "mat4");
-		vec3.transformMat4(sCameraPosition, satellitePosition, satelliteModel);
+		const index = helper.meshs.findIndex(mesh => mesh.name === satelliteName);
+		helper.meshs[index].M = satelliteModel;
 		render_scene({
 			gl,
 			canvas,
 			helper,
-			latitudeHelper,
 			earth,
-			satellite
 		});
 	};
 
 	const updateAngleAndRender = () => {
 		rotationValue.textContent = rotationSlider.value;
 		const angle = parseFloat(rotationSlider.value);
-		
 		const earthModel = mat4.create();
-		//mat4.rotateX(earthModel, earthModel, toRadian(-90));
 		mat4.rotateY(earthModel, earthModel, toRadian(angle));
-		earth.program.setUniform("M", earthModel, "mat4");
+		earth.meshs[0].M = earthModel;
 		render_scene({
 			gl,
 			canvas,
 			helper,
-			latitudeHelper,
 			earth,
-			satellite
+		});
+	}
+
+	const updateSpotAndRender = () => {
+		spotSliderValue.textContent = spotSlider.value;
+		const angle = parseFloat(spotSlider.value);
+		earth.program.setUniform("outerAngle", angle, "float");
+		render_scene({
+			gl,
+			canvas,
+			helper,
+			earth,
 		});
 	}
 }
 
 function render_scene(params) {
-    const {gl, canvas, helper, latitudeHelper, earth, satellite} = params;
+    const {gl, canvas, helper, earth} = params;
+
+	const index = helper.meshs.findIndex(mesh => mesh.name === satelliteName);
+	var satelliteLocation = [0, 0, 10];
+	vec3.transformMat4(satelliteLocation, satelliteLocation, helper.meshs[index].M);
+	earth.program.setUniform("spotLightPosition", satelliteLocation, "vec3");
 
     gl.clearColor(0.1, 0.1, 0.1, 1);
-
     gl.viewport(0, 0, canvas.width / 2, canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT);
-
-	const VP1 = mat4.create();
-    mat4.perspective(VP1, toRadian(30), (canvas.width / 2) / canvas.height, 1, 100);
-	const cameraPosition = [30, 10, 30];
-	const lightPosition = [15, 35, 15];
+	const leftVP = mat4.create();
+	mat4.perspective(leftVP, toRadian(30), (canvas.width / 2) / canvas.height, 1, 100);
 	var up = [0, 1, 0];
 	var fPosition = [0, 0, 0];
 	var viewMatrix = mat4.create();
-    mat4.lookAt(viewMatrix, cameraPosition, fPosition, up);
-	mat4.multiply(VP1, VP1, viewMatrix);
-	earth.program.setUniform("VP", VP1, "mat4");
-	helper.program.setUniform("VP", VP1, "mat4");
-	satellite.program.setUniform("VP", VP1, "mat4");
-	latitudeHelper.program.setUniform("VP", VP1, "mat4");
+	mat4.lookAt(viewMatrix, cameraPositionW, fPosition, up);
+	mat4.multiply(leftVP, leftVP, viewMatrix);
+	earth.program.VP = leftVP;
+	helper.program.VP = leftVP;
 
     gl.enable(gl.DEPTH_TEST);
     helper.draw();
-    latitudeHelper.draw();
     earth.draw();
-    satellite.draw();
-
     gl.viewport(canvas.width / 2, 0, canvas.width / 2, canvas.height);
-	const VP = mat4.create();
-	console.log(satellitePosition);
-    mat4.perspective(VP, toRadian(40), (canvas.width / 2) / canvas.height, 1, 100);
-	var up = [0, 1, 0];
-	var fPosition = [0, 0, 0];
-	var viewMatrix = mat4.create();
-    mat4.lookAt(viewMatrix, sCameraPosition, fPosition, up);
-	mat4.multiply(VP, VP, viewMatrix);
+	const rightVP = mat4.create();
+    mat4.perspective(rightVP, toRadian(30), (canvas.width / 2) / canvas.height, 1, 100);
+	const viewMatrix2 = mat4.create();
+	mat4.copy(viewMatrix2, helper.meshs[index].M);
+	mat4.translate(viewMatrix2, viewMatrix2, [0, 0, 10]);
+	mat4.invert(viewMatrix2, viewMatrix2);
+	mat4.multiply(rightVP, rightVP, viewMatrix2);
 
-	earth.program.setUniform("VP", VP, "mat4");
-	helper.program.setUniform("VP", VP, "mat4");
-	satellite.program.setUniform("VP", VP, "mat4");
-	latitudeHelper.program.setUniform("VP", VP, "mat4");
+	earth.program.VP = rightVP;
+	helper.program.VP = rightVP;
 
     gl.enable(gl.DEPTH_TEST);
     helper.draw();
-    latitudeHelper.draw();
     earth.draw();
-    satellite.draw();
 }
 
 
