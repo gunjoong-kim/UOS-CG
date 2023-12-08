@@ -117,24 +117,24 @@ async function main()
     };
 
     // initialize the axes
-    let sources_axes = await fetch_shader_files("./axes.vert", "./axes.frag");
+    let sources_axes = await fetch_shader_files("../shader/axes.vert", "../shader/axes.frag");
     sources_axes[0] = sources_axes[0].replace("${loc_aPosition}", loc_aPosition);
     sources_axes[0] = sources_axes[0].replace("${loc_aColor}", loc_aColor);
     const axes = new Axes(gl,sources_axes[0], sources_axes[1], 4);
 
     // initialize the points
-    let sources_points = await fetch_shader_files("./points.vert", "./points.frag");
+    let sources_points = await fetch_shader_files("../shader/points.vert", "../shader/points.frag");
     sources_points[0] = sources_points[0].replace("${loc_aPosition}", loc_aPosition);
     sources_points[0] = sources_points[0].replace("${loc_aColor}", loc_aColor);
 
-    let sources_points_id = await fetch_shader_files("./points.vert", "./points-id.frag");
+    let sources_points_id = await fetch_shader_files("../shader/points.vert", "../shader/points-id.frag");
 
     const points = new Points(gl,sources_points[0], sources_points[1], sources_points_id[1], canvas.clientWidth, canvas.clientHeight);
 
 
     // initialize the patch
-    let img = await load_image("./proj3.png");
-    let sources = await fetch_shader_files("./texmap-patch.vert", "./texmap-patch.frag");
+    let img = await load_image("../img/proj3.png");
+    let sources = await fetch_shader_files("../shader/texmap-patch.vert", "../shader/texmap-patch.frag");
     sources[0] = sources[0].replace("${loc_aTexCoords}", loc_aTexCoords);
 
     let patch = new Patch(gl, 20, img, sources[0], sources[1], sun, gold);
