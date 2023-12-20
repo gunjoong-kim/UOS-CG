@@ -15,8 +15,6 @@ const binding_point = 1;
 
 const TEXUNIT_PATCH = 1;
 
-
-
 async function main()
 {
     const canvas = document.getElementById('webgl');
@@ -356,16 +354,18 @@ class Patch
         this.shader = new Shader(gl, src_vert, src_frag);
 
         gl.useProgram(this.shader.h_prog);
+        console.log(this.shader.loc_uniforms);
         gl.uniform1i(this.shader.loc_uniforms["tex"], TEXUNIT_PATCH);
-        gl.uniform3fv(this.shader.loc_uniforms["sun.direction"], light.direction);
-        gl.uniform3fv(this.shader.loc_uniforms["sun.ambient"], light.ambient);
-        gl.uniform3fv(this.shader.loc_uniforms["sun.diffusive"], light.diffusive);
-        gl.uniform3fv(this.shader.loc_uniforms["sun.specular"], light.specular);
-        gl.uniform3fv(this.shader.loc_uniforms["material.ambient"], material.ambient);
-        gl.uniform3fv(this.shader.loc_uniforms["material.diffusive"], material.diffusive);
-        gl.uniform3fv(this.shader.loc_uniforms["material.specular"], material.specular);
-        gl.uniform1f(this.shader.loc_uniforms["material.shininess"], material.shininess);
-		gl.uniform4fv(this.shader.loc_uniforms["points"], points);
+        gl.uniform3fv(this.shader.loc_uniforms["lightDirection"], light.direction);
+        gl.uniform3fv(this.shader.loc_uniforms["sunAmbient"], light.ambient);
+        gl.uniform3fv(this.shader.loc_uniforms["sunDiffusive"], light.diffusive);
+        gl.uniform3fv(this.shader.loc_uniforms["sunSpecular"], light.specular);
+        gl.uniform3fv(this.shader.loc_uniforms["materialAmbient"], material.ambient);
+        gl.uniform3fv(this.shader.loc_uniforms["materialDiffusive"], material.diffusive);
+        gl.uniform3fv(this.shader.loc_uniforms["materialSpecular"], material.specular);
+        gl.uniform1f(this.shader.loc_uniforms["materialShininess"], material.shininess);
+		gl.uniform4fv(this.shader.loc_uniforms["points[0]"], points);
+        gl.uniform1iv(this.shader.loc_uniforms["connectivity[0]"], this.connectivity);
         gl.useProgram(null);
     }
 
@@ -387,11 +387,94 @@ class Patch
 
 	upload_data(gl, points)
 	{
-		gl.uniform4fv(this.shader.loc_uniforms["points"], points);
+        gl.useProgram(this.shader.h_prog);
+		gl.uniform4fv(this.shader.loc_uniforms["points[0]"], points);
 	}
 
     init_patch(gl, N)
     {
+        this.connectivity = new Int32Array([
+                15, 12, 13, 14,
+                11,  8,  9, 10,
+                 3,  0,  1,  2,
+                 7,  4,  5,  6,
+
+                14, 15, 12, 13,
+                10, 11,  8,  9,
+                 2,  3,  0,  1,
+                 6,  7,  4,  5,
+
+                12, 13, 14, 15,
+                 8,  9, 10, 11,
+                 0,  1,  2,  3,
+                 4,  5,  6,  7,
+
+                13, 14, 15, 12,
+                 9, 10, 11,  8,
+                 1,  2,  3,  0,
+                 5,  6,  7,  4,
+
+                10,  9,  8, 11,
+                14, 13, 12,  15,
+                 6,  5,  4,  7,
+                 2,  1,  0,  3,
+
+                 9,  8, 11, 10,
+                13, 12, 15, 14,
+                 5,  4,  7,  6,
+                 1,  0,  3,  2,
+
+                 8, 11, 10,  9,
+                12, 15, 14, 13,
+                 4,  7,  6,  5,
+                 0,  3,  2,  1,
+
+                11, 10,  9,  8,
+                15, 14, 13, 12,
+                 7,  6,  5,  4,
+                 3,  2,  1,  0,
+
+                 7,  4,  5,  6,
+                15, 12, 13, 14,
+                11,  8,  9, 10,
+                 3,  0,  1,  2,
+
+                 6,  7,  4,  5,
+                14, 15, 12,  13,
+                10, 11,  8,  9,
+                 2,  3,  0,  1,
+
+                 5,  6,  7,  4,
+                13, 14, 15, 12,
+                 9, 10, 11,  8,
+                 1,  2,  3,  0,
+
+                 4,  5,  6,  7,
+                12, 13, 14, 15,
+                 8,  9, 10, 11,
+                 0,  1,  2,  3,
+
+                14, 13, 12, 15,
+                 6,  5,  4,  7,
+                 2,  1,  0,  3,
+                10,  9,  8,  11,
+
+                13, 12, 15, 14,
+                 5,  4,  7,  6,
+                 1,  0,  3,  2,
+                 9,  8, 11, 10,
+
+                12, 15, 14, 13,
+                 4,  7,  6,  5,
+                 0,  3,  2,  1,
+                 8, 11, 10,  9,
+
+                15, 14, 13, 12,
+                 7,  6,  5,  4,
+                 3,  2,  1,  0,
+                11, 10,  9,  8
+        ])
+        
         let texcoord = [];
         for(let row=0 ; row<=N ; row++)
         {
@@ -454,7 +537,8 @@ class Patch
         gl.activeTexture(gl.TEXTURE0 + TEXUNIT_PATCH);
         gl.bindTexture(gl.TEXTURE_2D, this.texture);
         gl.bindVertexArray(this.vao);
-        gl.drawElements(gl.TRIANGLES, this.num_indices, gl.UNSIGNED_SHORT, 0);
+        gl.drawElementsInstanced(gl.TRIANGLES, this.num_indices, gl.UNSIGNED_SHORT, 0, 16);
+        //gl.drawElements(gl.TRIANGLES, this.num_indices, gl.UNSIGNED_SHORT, 0);
     }
  
 }
@@ -474,22 +558,22 @@ class Points
     {
         this.count = 16;
         this.points = new Float32Array([
-            -2,-2,-2, 1,
-            -2,-2, 2, 1,
-            -2, 2,-2, 1,
-            -2, 2, 2, 1,
-             2,-2,-2, 1,
-             2,-2, 2, 1,
-             2, 2,-2, 1,
-             2, 2, 2, 1,
-			-6,-6,-2, 1,
-            -6,-6, 2, 1,
-            -6, 6,-2, 1,
-            -6, 6, 2, 1,
-             6,-6,-2, 1,
-             6,-6, 2, 1,
-             6, 6,-2, 1,
-             6, 6, 2, 1
+            -6, -6, -2, 1,
+             6, -6, -2, 1,
+             6,  6, -2, 1,
+            -6,  6, -2, 1,
+            -2, -2, -2, 1,
+             2, -2, -2, 1,
+             2,  2, -2, 1,
+            -2,  2, -2, 1,
+            -6, -6,  2, 1,
+             6, -6,  2, 1,
+             6,  6,  2, 1,
+            -6,  6,  2, 1,
+            -2, -2,  2, 1,
+             2, -2,  2, 1,
+             2,  2,  2, 1,
+            -2,  2,  2, 1
         ]);
  
         const ids = new Uint8Array([
