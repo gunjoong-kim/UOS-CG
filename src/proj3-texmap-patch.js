@@ -11,6 +11,8 @@ const loc_aNormal = 3;
 const loc_aDu = 4;
 const loc_aDv = 5;
 
+const binding_point = 1;
+
 const TEXUNIT_PATCH = 1;
 
 
@@ -137,7 +139,7 @@ async function main()
     let sources = await fetch_shader_files("../shader/texmap-patch.vert", "../shader/texmap-patch.frag");
     sources[0] = sources[0].replace("${loc_aTexCoords}", loc_aTexCoords);
 
-    let patch = new Patch(gl, 20, img, sources[0], sources[1], sun, gold);
+    let patch = new Patch(gl, 20, img, sources[0], sources[1], sun, gold, points.points);
 
     let MVP = mat4.create();
     let tick = function()
@@ -149,6 +151,7 @@ async function main()
         points.upload_data(gl);
         points.render(gl, V, P);
 
+		patch.upload_data(gl, points.points);
         patch.render(gl, V, P);
        
         requestAnimationFrame(tick, canvas); // Request that the browser calls tick
@@ -346,7 +349,7 @@ function load_image(url)
 
 class Patch 
 {
-    constructor(gl, N, image, src_vert, src_frag, light, material) 
+    constructor(gl, N, image, src_vert, src_frag, light, material, points) 
     {
         this.init_patch(gl, N);
         this.init_texture(gl, image);
@@ -362,9 +365,8 @@ class Patch
         gl.uniform3fv(this.shader.loc_uniforms["material.diffusive"], material.diffusive);
         gl.uniform3fv(this.shader.loc_uniforms["material.specular"], material.specular);
         gl.uniform1f(this.shader.loc_uniforms["material.shininess"], material.shininess);
+		gl.uniform4fv(this.shader.loc_uniforms["points"], points);
         gl.useProgram(null);
-
-
     }
 
     init_texture(gl, image)
@@ -381,10 +383,12 @@ class Patch
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
     
         gl.bindTexture(gl.TEXTURE_2D, null);
-         
     }
 
-
+	upload_data(gl, points)
+	{
+		gl.uniform4fv(this.shader.loc_uniforms["points"], points);
+	}
 
     init_patch(gl, N)
     {
@@ -466,22 +470,30 @@ class Points
         this.init_fbo(gl, width, height);
     }
 
-    init_vbo(gl,l)
+    init_vbo(gl)
     {
-        this.count = 8;
+        this.count = 16;
         this.points = new Float32Array([
-            -1,-1,-1,
-            -1, 1,-1,
-             1, 1,-1,
-             1,-1,-1,
-            -1,-1, 1,
-            -1, 1, 1,
-             1, 1, 1,
-             1,-1, 1,
+            -2,-2,-2, 1,
+            -2,-2, 2, 1,
+            -2, 2,-2, 1,
+            -2, 2, 2, 1,
+             2,-2,-2, 1,
+             2,-2, 2, 1,
+             2, 2,-2, 1,
+             2, 2, 2, 1,
+			-6,-6,-2, 1,
+            -6,-6, 2, 1,
+            -6, 6,-2, 1,
+            -6, 6, 2, 1,
+             6,-6,-2, 1,
+             6,-6, 2, 1,
+             6, 6,-2, 1,
+             6, 6, 2, 1
         ]);
  
         const ids = new Uint8Array([
-            0, 1, 2, 3, 4, 5, 6, 7
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
         ]);
         this.vao = gl.createVertexArray();
         gl.bindVertexArray(this.vao);
@@ -490,20 +502,33 @@ class Points
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo_position);
         gl.bufferData(gl.ARRAY_BUFFER, this.points, gl.DYNAMIC_DRAW);  // DYNAMI_DRAW!!!
         
-        gl.vertexAttribPointer(loc_aPosition, 3, gl.FLOAT, false, 0, 0);
+        gl.vertexAttribPointer(loc_aPosition, 4, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(loc_aPosition);
-    
-        const vbo_id = gl.createBuffer();  
+
+		const vbo_id = gl.createBuffer();  
         gl.bindBuffer(gl.ARRAY_BUFFER, vbo_id);
         gl.bufferData(gl.ARRAY_BUFFER, ids, gl.STATIC_DRAW);  
         
         gl.vertexAttribPointer(loc_aColor, 1, gl.UNSIGNED_BYTE, true, 0, 0);
         gl.enableVertexAttribArray(loc_aColor);
-        
-        gl.bindVertexArray(null);
+
+		gl.bindVertexArray(null);
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
- 
     }
+
+	inti_ubo(gl)
+	{
+		const blockIndex = gl.getUniformBlockIndex(Points.shader.h_prog, "Point");
+		gl.uniformBlockBinding(Points.shader.h_prog, blockIndex, binding_point);
+
+		this.ubo = gl.createBuffer();
+		gl.bindBufferBase(gl.UNIFORM_BUFFER, binding_point, this.ubo);
+		gl.bindBuffer(gl.UNIFORM_BUFFER, this.ubo);
+		const pointsData = new Float32Array(this.points);
+		gl.bufferData(gl.UNIFORM_BUFFER, pointsData, gl.DYNAMIC_DRAW);
+		gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+	}
+
     set_uniform_matrices(gl, shader, V, P)
     {
         mat4.copy(this.MVP, P);
@@ -515,7 +540,7 @@ class Points
         gl.useProgram(Points.shader.h_prog);
         gl.bindVertexArray(this.vao);
         this.set_uniform_matrices(gl, Points.shader, V, P);
-        gl.drawArrays(gl.POINTS, 0, 8);
+        gl.drawArrays(gl.POINTS, 0, this.count);
         gl.bindVertexArray(null);
         gl.useProgram(null);
     }
@@ -524,7 +549,7 @@ class Points
         gl.useProgram(Points.shader_id.h_prog);
         gl.bindVertexArray(this.vao);
         this.set_uniform_matrices(gl, Points.shader_id, V, P);
-        gl.drawArrays(gl.POINTS, 0, 8);
+        gl.drawArrays(gl.POINTS, 0, this.count);
         gl.bindVertexArray(null);
         gl.useProgram(null);
     }
@@ -533,16 +558,18 @@ class Points
     {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo_position);
         gl.bufferData(gl.ARRAY_BUFFER, this.points, gl.DYNAMIC_DRAW);  // DYNAMI_DRAW!!!
-        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		//gl.bindBuffer(gl.UNIFORM_BUFFER, this.ubo);
+		//gl.bufferSubData(gl.UNIFORM_BUFFER, 0, this.points);
+        //gl.bindBuffer(gl.UNIFROM_BUFFER, null);
     }
     get_point_selected()
     {
         let index = this.selected;
-        return [this.points[index*3],this.points[index*3+1],this.points[index*3+2]];
+        return [this.points[index*4],this.points[index*4+1],this.points[index*4+2]];
     }
     update_point_selected(position)
     {
-        this.points.set([position[0], position[1], position[2]], this.selected*3);
+        this.points.set([position[0], position[1], position[2]], this.selected*4);
     }
     init_fbo(gl, fbo_width, fbo_height)
     {

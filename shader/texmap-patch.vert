@@ -2,6 +2,7 @@
 #define M_PI 3.1415926535897932384626433832795
 layout(location=${loc_aTexCoords}) in vec2 aTexCoords;
 uniform mat4 MVP;
+uniform vec4 points[16];
 out vec2 vTexCoords;
 void main() 
 {
